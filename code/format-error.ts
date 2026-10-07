@@ -19,7 +19,7 @@ export default function main(items: Item[], _ctx: Ctx): Item[] {
       `Node: ${escapeHtml(execution.lastNodeExecuted ?? 'unknown')}`,
       escapeHtml(message),
     ];
-    if (execution.url) lines.push(execution.url);
+    if (execution.url) lines.push(escapeHtml(execution.url));
     return { json: { text: lines.join('\n') } };
   });
 }

@@ -45,3 +45,14 @@ test('format error escapes HTML, redacts and truncates', () => {
   assert.ok(text.includes('…') && !text.includes('a@b.co'));
   assert.equal(escapeHtml('<b>&'), '&lt;b&gt;&amp;');
 });
+
+test('redact still finds a card followed by its expiry date', () => {
+  assert.equal(redact('card 4111111111111111-12/25'), 'card [card ****1111]-12/25');
+  assert.equal(redact('4111 1111 1111 1111 12/25 cvv'), '[card ****1111] 12/25 cvv');
+  assert.equal(redact('order 1234 5678 9012 3456 12/25'), 'order 1234 5678 9012 3456 12/25');
+});
+
+test('format error escapes the execution url too', () => {
+  const [out] = formatError([{ json: { workflow: { name: 'w' }, execution: { error: { message: 'x' }, url: 'https://n8n/e/1?a=1&b=<2>' } } }], ctx);
+  assert.match((out.json as { text: string }).text, /a=1&amp;b=&lt;2&gt;$/);
+});
