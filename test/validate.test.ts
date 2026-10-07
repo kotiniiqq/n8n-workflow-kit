@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
 import { finalize, listWorkflowSources, loadWorkflow, type WorkflowJson } from '../kit/build.ts';
-import { validateAll, validateOne } from '../kit/validate.ts';
+import { secretsInBuild, validateAll, validateOne } from '../kit/validate.ts';
 
 const webhook = (name = 'Hook', path = 'p') => ({ name, type: 'n8n-nodes-base.webhook', typeVersion: 2, position: [0, 0], parameters: { httpMethod: 'POST', path } });
 const code = (name: string, jsCode: string) => ({ name, type: 'n8n-nodes-base.code', typeVersion: 2, position: [200, 0], parameters: { jsCode } });
@@ -69,4 +69,11 @@ test('top-level await and return are valid Code-node code', () => {
 test('two workflows on the same webhook path', () => {
   const issues = validateAll([wf([webhook('A', 'same')], {}, 'one'), wf([webhook('B', 'same')], {}, 'two')]);
   assert.ok(rules(issues).includes('webhook-paths'));
+});
+
+test('secrets are also caught after environment values are filled in', () => {
+  const w = { name: 'w', nodes: [{ name: 'Call', type: 'n8n-nodes-base.httpRequest', parameters: { url: 'https://api.example.com/v1?api_key=abcd1234efgh5678' } }], connections: {}, settings: {} };
+  assert.deepEqual(secretsInBuild(w as any, 'production').map((i) => i.message), ["parameter looks like a hardcoded key in a query string (environment 'production')"]);
+  const stripe = { ...w, nodes: [{ ...w.nodes[0], parameters: { header: 'sk_live_' + 'a'.repeat(24) } }] };
+  assert.equal(secretsInBuild(stripe as any, 'staging')[0].message, "parameter looks like a hardcoded stripe key (environment 'staging')");
 });

@@ -13,7 +13,7 @@ import { BuildError, build, listWorkflowSources, loadEnvironments, loadWorkflow 
 import { ROOT } from './code.ts';
 import { DeployError, DriftError, deploy, diffAgainstLive, rollback } from './deploy.ts';
 import { N8nApi, N8nApiError } from './n8n-api.ts';
-import { validateAll } from './validate.ts';
+import { secretsInBuild, validateAll } from './validate.ts';
 
 const USAGE = `usage: n8n-kit <build|validate|diff|deploy|rollback> [name] --env <environment> [--dry-run] [--force] [--only a,b]`;
 
@@ -47,8 +47,10 @@ export async function main(argv: string[]): Promise<number> {
     case 'validate': {
       const workflows = await Promise.all(listWorkflowSources().map((f) => loadWorkflow(f)));
       const issues = validateAll(workflows);
+      for (const e of Object.keys(loadEnvironments())) { // every environment must resolve, without secrets
+        for (const b of await build(e)) issues.push(...secretsInBuild(b.json, e));
+      }
       for (const i of issues) console.log(`${i.workflow}${i.node ? ` / ${i.node}` : ''}: [${i.rule}] ${i.message}`);
-      for (const e of Object.keys(loadEnvironments())) await build(e); // every environment must resolve
       console.log(issues.length ? `${issues.length} problem(s)` : `${workflows.length} workflows valid for ${Object.keys(loadEnvironments()).join(', ')}`);
       return issues.length ? 1 : 0;
     }
@@ -66,15 +68,19 @@ export async function main(argv: string[]): Promise<number> {
     }
     case 'deploy': {
       let built = await build(env);
+      const sourceNames = built.map((b) => b.name);
       if (values.only) {
         const only = new Set(values.only.split(',').map((s) => s.trim()));
         const unknown = [...only].filter((n) => !built.some((b) => b.name === n));
         if (unknown.length) throw new BuildError(`--only: no such workflow ${unknown.join(', ')}`);
         built = built.filter((b) => only.has(b.name));
       }
-      const issues = validateAll(await Promise.all(listWorkflowSources().map((f) => loadWorkflow(f))));
+      const issues = [
+        ...validateAll(await Promise.all(listWorkflowSources().map((f) => loadWorkflow(f)))),
+        ...built.flatMap((b) => secretsInBuild(b.json, env)),
+      ];
       if (issues.length) throw new BuildError(`validation failed (${issues.length} problems); run validate`);
-      const steps = await deploy(built, deployOptions());
+      const steps = await deploy(built, { ...deployOptions(), sourceNames });
       console.log(`${values['dry-run'] ? 'planned' : 'done'}: ${steps.map((s) => `${s.workflow} ${s.action}`).join(', ')}`);
       return 0;
     }

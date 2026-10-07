@@ -7,8 +7,9 @@
  *   npm run e2e
  *
  * It deploys with the kit, calls the production webhook, makes the helpdesk fail to fire the error
- * workflow, edits a workflow behind the kit's back to trigger drift detection, then forces a deploy
- * and rolls it back. The n8n instance should be a throwaway one: the script creates and changes
+ * workflow, saves an unpublished edit behind the kit's back (production must keep running and the
+ * deploy must refuse), forces a deploy, then ships a change and rolls it back. The n8n instance
+ * should be a throwaway one: the script creates and changes
  * the workflows "support-intake" and "error-alert" there.
  */
 import assert from 'node:assert/strict';
@@ -78,18 +79,21 @@ async function main() {
   try {
     const built = await build(ENV, { outDir: path.join(work, 'dist') });
 
-    // 1. first deploy takes over whatever is there (force), creates and activates
+    // 1. first deploy takes over whatever is there (force), creates and publishes with the fingerprint
     const first = await deploy(built, opts);
     const intake = (await api.findByName('support-intake'))!;
     const alert = (await api.findByName('error-alert'))!;
-    assert.ok(intake.active, 'support-intake is active');
+    assert.ok(intake.active && alert.active, 'both published');
     assert.equal(intake.settings.errorWorkflow, alert.id, 'errorWorkflow resolved to the live id');
-    pass(`deploy: ${first.map((s) => `${s.workflow} ${s.action}`).join(', ')}; webhook active; errorWorkflow -> ${alert.id}`);
+    assert.match(intake.activeVersion?.description ?? '', /^n8n-workflow-kit build [0-9a-f]{16}$/);
+    pass(`deploy: ${first.map((s) => `${s.workflow} ${s.action}`).join(', ')}; both published, errorWorkflow -> ${alert.id}, fingerprint "${intake.activeVersion!.description}"`);
 
-    // 2. redeploy of the same source is a no-op: the kit's normalization matches what n8n stores
+    // 2. redeploy of the same source is a no-op, also from a machine with no local state
     const second = await deploy(built, { ...opts, force: false });
     assert.deepEqual(second.map((s) => s.action), ['unchanged', 'unchanged'], JSON.stringify(second));
-    pass('redeploy without changes: unchanged, unchanged (no false drift)');
+    const elsewhere = await deploy(built, { ...opts, force: false, stateDir: path.join(work, 'other-machine') });
+    assert.deepEqual(elsewhere.map((s) => s.action), ['unchanged', 'unchanged'], JSON.stringify(elsewhere));
+    pass('redeploy without changes: unchanged, unchanged; same from a second machine with no local state');
 
     // 3. valid ticket: routed, created in the helpdesk with the credential, 202 back
     const webhook = `${env.url}/webhook/support-intake`;
@@ -105,7 +109,7 @@ async function main() {
     pass('valid ticket: 202 {queue: billing}; helpdesk got the ticket with the Bearer credential, card redacted in message_for_logs');
 
     // 4. invalid ticket: 400 with the validation errors, helpdesk untouched
-    const before = mock.received.length;
+    let before = mock.received.length;
     r = await post({ email: 'nope', message: '' });
     assert.equal(r.status, 400);
     assert.deepEqual(await r.json(), { status: 'invalid', errors: ['email is missing or invalid', 'message is empty'] });
@@ -121,32 +125,46 @@ async function main() {
     assert.match(sent.body.text, /Node: Create Helpdesk Ticket/);
     pass(`helpdesk 500: webhook ${r.status}; error-alert sent to Telegram: ${JSON.stringify(sent.body.text.split('\n').slice(0, 2).join(' | '))}`);
 
-    // 6. someone edits the workflow in the UI -> the next deploy refuses and names the change
-    const live = (await api.getWorkflow(intake.id));
-    const edited = structuredClone(live);
-    edited.nodes.find((n) => n.name === 'Create Helpdesk Ticket')!.parameters.options.timeout = 30000;
-    await api.updateWorkflow(intake.id, writable(edited));
+    // 6. an unpublished edit (what the UI's Save does): production keeps the published version, deploy refuses
+    const draft = structuredClone(await api.getWorkflow(intake.id));
+    const helpdeskNode = draft.nodes.find((n) => n.name === 'Create Helpdesk Ticket')!;
+    helpdeskNode.parameters.options.timeout = 30000;
+    helpdeskNode.parameters.url = 'http://localhost:8787/broken';
+    await api.saveDraft(intake.id, writable(draft));
+    before = mock.received.length;
+    r = await post({ email: 'carol@example.com', message: 'refund please' });
+    assert.equal(r.status, 202, 'the published version still serves the webhook');
+    assert.equal(mock.received[before]?.path, '/api/tickets');
     await assert.rejects(deploy(built, { ...opts, force: false }), (err: unknown) => {
       assert.ok(err instanceof DriftError);
-      assert.ok(err.changes.some((c) => c === "~ node 'Create Helpdesk Ticket': parameters changed"), err.changes.join('; '));
+      assert.ok(err.changes.some((c) => c.trim() === "~ node 'Create Helpdesk Ticket': parameters changed"), err.changes.join('; '));
       return true;
     });
-    pass("edit on the server: deploy stops with DriftError: ~ node 'Create Helpdesk Ticket': parameters changed");
+    pass("unpublished edit: webhook still served by the published version (202); deploy stops with drift on 'Create Helpdesk Ticket'");
 
-    // 7. --force overwrites (backing the edit up), rollback brings the edit back
+    // 7. --force overwrites the draft and keeps it in the backup
     const forced = await deploy(built, opts);
     const step = forced.find((s) => s.workflow === 'support-intake')!;
     assert.equal(step.action, 'update');
-    assert.ok(step.backup && fs.existsSync(step.backup));
-    const timeoutOf = async () => (await api.getWorkflow(intake.id)).nodes.find((n) => n.name === 'Create Helpdesk Ticket')!.parameters.options.timeout;
-    assert.equal(await timeoutOf(), 10000);
-    await rollback('support-intake', opts);
-    assert.equal(await timeoutOf(), 30000);
-    assert.ok((await api.getWorkflow(intake.id)).active, 'still active after rollback');
-    pass('deploy --force: update with backup; rollback restored the edited version and kept it active');
+    const backedUp = JSON.parse(fs.readFileSync(step.backup!, 'utf8'));
+    assert.equal(backedUp.nodes.find((n: any) => n.name === 'Create Helpdesk Ticket').parameters.options.timeout, 30000);
+    const publishedTimeout = async () => (await api.getWorkflow(intake.id)).activeVersion!.nodes.find((n) => n.name === 'Create Helpdesk Ticket')!.parameters.options.timeout;
+    assert.equal(await publishedTimeout(), 10000);
+    pass('deploy --force: update; the overwritten draft is in the backup');
 
-    // leave the server matching the source
-    await deploy(built, opts);
+    // 8. a real change goes live; rollback puts the previous published version back
+    const changed = structuredClone(built);
+    changed.find((b) => b.name === 'support-intake')!.json.nodes.find((n) => n.name === 'Create Helpdesk Ticket')!.parameters.options.timeout = 20000;
+    const update = await deploy(changed, { ...opts, force: false });
+    assert.equal(update.find((s) => s.workflow === 'support-intake')!.action, 'update');
+    assert.equal(await publishedTimeout(), 20000);
+    await rollback('support-intake', { ...opts, force: false });
+    assert.equal(await publishedTimeout(), 10000);
+    assert.ok((await api.getWorkflow(intake.id)).active, 'still published after rollback');
+    const after = await deploy(built, { ...opts, force: false });
+    assert.deepEqual(after.map((s) => s.action), ['unchanged', 'unchanged']);
+    pass('change deployed (timeout 20000 live), rollback restored 10000 and kept it published; source and server agree again');
+
     console.log(`\n${results.length} checks passed against n8n at ${env.url}`);
   } finally {
     mock.close();

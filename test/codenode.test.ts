@@ -4,10 +4,11 @@ import vm from 'node:vm';
 
 import { bundleCode } from '../kit/code.ts';
 
-/** Run generated jsCode the way n8n 2.x's JS task runner does: in a vm context, inside an async
- *  function, after the runner's hardening (Object.defineProperty is a no-op there and built-ins are
- *  frozen; copied from @n8n/task-runner's createVmExecutableCode). Plain Node misses that: a bundle
- *  whose exports rely on defineProperty passed here and failed in real n8n. */
+/** Run generated jsCode the way n8n 2.40's JS task runner does: in a vm context, inside an async
+ *  function, after the preamble the runner puts in front of every Code node (copied from
+ *  @n8n/task-runner's createVmExecutableCode: Object.defineProperty is a no-op, constructors are
+ *  frozen). Plain Node misses that: a bundle whose exports relied on defineProperty passed in plain
+ *  Node and failed in real n8n. The runner's process-level hardening is not reproduced here. */
 const N8N_HARDENING = [
   'globalThis.global = globalThis',
   'var module = { exports: {} }',
@@ -15,9 +16,13 @@ const N8N_HARDENING = [
   'Reflect.getPrototypeOf = () => ({})',
   'Object.setPrototypeOf = () => false',
   'Reflect.setPrototypeOf = () => false',
+  'delete Error.prepareStackTrace',
+  'delete Error.captureStackTrace',
+  'Object.defineProperty(Error, "prepareStackTrace", { configurable: false, writable: false, value: undefined })',
+  'Object.defineProperty(Error, "captureStackTrace", { configurable: false, writable: false, value: undefined })',
   'Object.defineProperty = () => ({})',
   'Object.defineProperties = () => ({})',
-  '[Object, Function, Array, String, Number, Boolean, RegExp, Error, Promise, Symbol, Map, Set, Date, JSON, Math, Reflect].forEach((c) => { try { Object.freeze(c); } catch {} })',
+  '[Object, Function, Array, String, Number, Boolean, RegExp, Error, TypeError, RangeError, SyntaxError, ReferenceError, Promise, Symbol, Map, Set, WeakMap, WeakSet, Date, JSON, Math, Reflect, ArrayBuffer, DataView, Int8Array, Uint8Array, Float32Array, Float64Array].forEach((constructor) => { try { Object.freeze(constructor); } catch {} })',
 ];
 
 async function runInN8nShape(jsCode: string, input: unknown[], nodes: Record<string, unknown[]> = {}) {

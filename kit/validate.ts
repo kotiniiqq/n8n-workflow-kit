@@ -3,6 +3,7 @@ import { validateWorkflow } from '@n8n/workflow-sdk';
 import vm from 'node:vm';
 
 import type { WorkflowJson } from './build.ts';
+import { isTrigger } from './nodes.ts';
 
 export interface Issue {
   workflow: string;
@@ -11,10 +12,14 @@ export interface Issue {
   message: string;
 }
 
-const TRIGGER_TYPES = /(trigger|webhook)$/i;
 const SECRET_PATTERNS: Array<[string, RegExp]> = [
   ['bearer token', /\bBearer\s+[A-Za-z0-9._~+/-]{16,}/],
+  ['basic auth', /\bBasic\s+[A-Za-z0-9+/]{16,}={0,2}/],
   ['api key', /\b(?:sk|pk|rk)-[A-Za-z0-9_-]{16,}/],
+  ['stripe key', /\b(?:sk|pk|rk)_(?:live|test)_[A-Za-z0-9]{16,}/],
+  ['github token', /\bgh[pousr]_[A-Za-z0-9]{30,}/],
+  ['slack token', /\bxox[abposr]-[A-Za-z0-9-]{10,}/],
+  ['aws access key', /\bAKIA[0-9A-Z]{16}\b/],
   ['key in a query string', /[?&](?:api_?key|token|secret|access_token)=[A-Za-z0-9._-]{8,}/i],
   ['JWT', /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/],
   ['telegram bot token', /\b\d{8,10}:[A-Za-z0-9_-]{35}\b/],
@@ -60,7 +65,7 @@ export function validateOne(json: WorkflowJson, opts: { source?: boolean } = { s
     }
   }
 
-  const triggers = json.nodes.filter((n) => TRIGGER_TYPES.test(n.type));
+  const triggers = json.nodes.filter(isTrigger);
   if (!triggers.length) add('trigger', 'workflow has no trigger node');
   const isError = json.nodes.some((n) => n.type === 'n8n-nodes-base.errorTrigger');
   if (!isError && !json.settings?.errorWorkflow) add('error-workflow', 'settings.errorWorkflow is not set');
@@ -71,17 +76,27 @@ export function validateOne(json: WorkflowJson, opts: { source?: boolean } = { s
         add('credential-ids', `credential '${type}' has a literal id; use cred() so each environment maps its own`, n.name);
       }
     }
-    walkStrings(n.parameters, (s) => {
-      for (const [label, pattern] of SECRET_PATTERNS) {
-        if (pattern.test(s)) add('secrets', `parameter looks like a hardcoded ${label}`, n.name);
-      }
-    });
+    issues.push(...secretsIn(json.name, n));
     if (n.type === 'n8n-nodes-base.code') {
       const error = compiles(String(n.parameters?.jsCode ?? ''));
       if (error) add('code-compiles', `Code node does not compile: ${error}`, n.name);
     }
   }
   return issues;
+}
+
+function secretsIn(workflow: string, n: Record<string, any>): Issue[] {
+  const found = new Set<string>();
+  walkStrings(n.parameters, (s) => {
+    for (const [label, pattern] of SECRET_PATTERNS) if (pattern.test(s)) found.add(label);
+  });
+  return [...found].map((label) => ({ workflow, node: n.name, rule: 'secrets', message: `parameter looks like a hardcoded ${label}` }));
+}
+
+/** Secrets in a built workflow, after environments.json values were filled in: that file is
+ *  committed too, so a key pasted into it is as public as one in a workflow source. */
+export function secretsInBuild(json: WorkflowJson, env: string): Issue[] {
+  return json.nodes.flatMap((n) => secretsIn(json.name, n)).map((i) => ({ ...i, message: `${i.message} (environment '${env}')` }));
 }
 
 /** Validate a set of workflows together: rules that span workflows live here. */

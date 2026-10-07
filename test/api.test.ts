@@ -17,17 +17,25 @@ const body = (name: string) => ({
   settings: { executionOrder: 'v1' },
 });
 
-test('create, read, update and activate', async () => {
+test('create, save a draft, publish: the published version only changes on publish', async () => {
   const created = await api.createWorkflow(body('alpha'));
   assert.equal(created.active, false);
-  await api.updateWorkflow(created.id, { ...body('alpha'), settings: { executionOrder: 'v1', timezone: 'UTC' } });
-  assert.equal((await api.activate(created.id)).active, true);
+  const first = await api.publish(created.id, created.versionId!, 'v1 of alpha');
+  assert.equal(first.activeVersion?.description, 'v1 of alpha');
+  const draft = await api.saveDraft(created.id, { ...body('alpha'), settings: { executionOrder: 'v1', timezone: 'UTC' } });
+  assert.notEqual(draft.versionId, draft.activeVersionId); // saved, not live
+  const live = await api.publish(created.id, draft.versionId!, 'v2');
+  assert.equal(live.activeVersionId, draft.versionId);
   assert.equal((await api.getWorkflow(created.id)).settings.timezone, 'UTC');
+  assert.equal((await api.unpublish(created.id)).active, false);
 });
 
-test('the client strips fields the API would reject', async () => {
-  const created = await api.createWorkflow({ ...body('beta'), id: 'x', active: true, tags: [], settings: { executionOrder: 'v1', madeUp: 1 } } as any);
+test('the client strips fields the API would reject, and keeps every setting it accepts', async () => {
+  const w = body('beta') as any;
+  w.nodes[0].extendsCredential = 'x'; // stored by n8n on some nodes, rejected by the write schema
+  const created = await api.createWorkflow({ ...w, id: 'x', active: true, tags: [], settings: { executionOrder: 'v1', redactionPolicy: 'all', madeUp: 1 } });
   assert.equal(created.name, 'beta');
+  assert.deepEqual(created.settings, { executionOrder: 'v1', redactionPolicy: 'all' });
 });
 
 test('the mock is as strict as the real API about extra fields', async () => {
@@ -47,7 +55,7 @@ test('listing follows pagination', async () => {
 
 test('errors carry method, path, status and the server message', async () => {
   await assert.rejects(api.getWorkflow('nope'), (e: unknown) =>
-    e instanceof N8nApiError && e.status === 404 && /GET \/workflows\/nope -> 404: workflow nope not found/.test(e.message));
+    e instanceof N8nApiError && e.status === 404 && /GET \/workflows\/nope\?excludePinnedData=true -> 404: workflow nope not found/.test(e.message));
   await assert.rejects(new N8nApi(mock.url, 'wrong').listWorkflows(), (e: unknown) => (e as N8nApiError).status === 401);
 });
 
