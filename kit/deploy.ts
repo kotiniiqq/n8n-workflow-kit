@@ -6,7 +6,8 @@
  *      difference means someone edited it in the UI, and the deploy stops (unless --force);
  *   3. back up the live version;
  *   4. resolve %%workflow:…%% references to live ids and create or update;
- *   5. activate it if it has a trigger that needs activation;
+ *   5. activate (publish) it if it has a trigger other than the manual one: n8n 2.x runs only the
+ *      published version of a workflow, error workflows and sub-workflows included;
  *   6. save a snapshot of what is now live.
  * Before any write, every workflow reference must resolve, so a run never deploys half a change.
  */
@@ -18,7 +19,7 @@ import { N8nApi, writable, type LiveWorkflow } from './n8n-api.ts';
 import { diff, normalize, same } from './normalize.ts';
 import { PLACEHOLDER } from './placeholders.ts';
 
-const NO_ACTIVATION = new Set(['n8n-nodes-base.manualTrigger', 'n8n-nodes-base.errorTrigger', 'n8n-nodes-base.executeWorkflowTrigger']);
+const NO_ACTIVATION = new Set(['n8n-nodes-base.manualTrigger']);
 
 export class DriftError extends Error {
   constructor(readonly workflow: string, readonly changes: string[]) {
@@ -145,6 +146,10 @@ export async function deploy(built: Built[], o: DeployOptions): Promise<Step[]> 
     if (!changes.length) {
       steps.push({ workflow: b.name, action: 'unchanged', id: current.id, changes });
       log(`= ${b.name} unchanged`);
+      if (o.dryRun) continue;
+      // a --force takeover of an identical workflow still has to arm the trigger and record the snapshot
+      if (needsActivation(desired) && !current.active) await o.api.activate(current.id);
+      if (!readSnapshot(o, b.name) || !current.active) writeSnapshot(o, await o.api.getWorkflow(current.id));
       continue;
     }
     log(`~ update ${b.name}\n  ${changes.join('\n  ')}`);

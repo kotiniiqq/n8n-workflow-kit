@@ -32,7 +32,7 @@ test('first deploy creates both, error workflow first, wires and activates', asy
   const intake = live('support-intake');
   assert.equal(intake.settings.errorWorkflow, live('error-alert').id);
   assert.equal(intake.active, true);                 // webhook trigger: activated
-  assert.equal(live('error-alert').active, false);  // error trigger: runs without activation
+  assert.equal(live('error-alert').active, true);   // n8n 2.x runs only published error workflows
   assert.doesNotMatch(JSON.stringify(intake), /%%/);
 });
 
@@ -137,4 +137,25 @@ test('diff shows built vs live', async () => {
   assert.deepEqual(await diffAgainstLive(built, opts.api), { 'error-alert': ['not on the server yet'], 'support-intake': ['not on the server yet'] });
   await deploy(built, opts);
   assert.deepEqual(await diffAgainstLive(built, opts.api), { 'error-alert': [], 'support-intake': [] });
+});
+
+test('--force takes over a workflow that already matches: snapshot saved, trigger re-armed', async () => {
+  await deploy(built, opts);
+  fs.rmSync(opts.stateDir, { recursive: true, force: true }); // e.g. a fresh checkout on another machine
+  mock.editInUi(live('support-intake').id, (w) => { w.active = false; });
+  await assert.rejects(deploy(built, opts), DriftError);
+  const steps = await deploy(built, { ...opts, force: true });
+  assert.deepEqual(steps.map((s) => s.action), ['unchanged', 'unchanged']);
+  assert.equal(live('support-intake').active, true);
+  const again = await deploy(built, opts);
+  assert.deepEqual(again.map((s) => s.action), ['unchanged', 'unchanged']);
+});
+
+test('activation: every trigger but the manual one, sub-workflows included (n8n 2.x runs published versions)', async () => {
+  const { needsActivation } = await import('../kit/deploy.ts');
+  const wf = (type: string) => ({ nodes: [{ type }] });
+  assert.equal(needsActivation(wf('n8n-nodes-base.errorTrigger')), true);
+  assert.equal(needsActivation(wf('n8n-nodes-base.executeWorkflowTrigger')), true);
+  assert.equal(needsActivation(wf('n8n-nodes-base.webhook')), true);
+  assert.equal(needsActivation(wf('n8n-nodes-base.manualTrigger')), false);
 });
