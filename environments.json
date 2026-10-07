@@ -1,0 +1,26 @@
+{
+  "staging": {
+    "url": "http://localhost:5678",
+    "apiKeyEnv": "N8N_API_KEY_STAGING",
+    "credentials": {
+      "alerts-bot": "stgTelegram0001",
+      "helpdesk-api": "stgHelpdesk0001"
+    },
+    "values": {
+      "helpdeskUrl": "https://helpdesk.staging.example.com/api/tickets",
+      "alertsChatId": "-1001111111111"
+    }
+  },
+  "production": {
+    "url": "https://n8n.example.com",
+    "apiKeyEnv": "N8N_API_KEY_PRODUCTION",
+    "credentials": {
+      "alerts-bot": "prdTelegram0001",
+      "helpdesk-api": "prdHelpdesk0001"
+    },
+    "values": {
+      "helpdeskUrl": "https://helpdesk.example.com/api/tickets",
+      "alertsChatId": "-1002222222222"
+    }
+  }
+}
