@@ -2,6 +2,8 @@
  *
  * Server-managed fields (id, active, versionId, timestamps, tags, pinData, staticData…) and node
  * positions are ignored: moving a node on the canvas is not a change worth stopping a deploy for.
+ * Credentials compare by type and id only: n8n resolves them by id and stores the credential's
+ * own display name in the node, so the name in the source never survives a save.
  */
 type Json = Record<string, any>;
 
@@ -13,10 +15,15 @@ function sortKeys(value: unknown): unknown {
   return value;
 }
 
+function credentialIds(credentials: Json | undefined): Json | undefined {
+  if (!credentials) return undefined;
+  return Object.fromEntries(Object.entries(credentials).map(([type, c]) => [type, { id: (c as Json)?.id }]));
+}
+
 function canonicalNode(n: Json): Json {
-  const { name, type, typeVersion, parameters, credentials, disabled, onError, retryOnFail, maxTries, waitBetweenTries, executeOnce, alwaysOutputData } = n;
+  const { name, type, typeVersion, parameters, disabled, onError, retryOnFail, maxTries, waitBetweenTries, executeOnce, alwaysOutputData } = n;
   return sortKeys(Object.fromEntries(Object.entries({
-    name, type, typeVersion, parameters: parameters ?? {}, credentials, disabled, onError, retryOnFail,
+    name, type, typeVersion, parameters: parameters ?? {}, credentials: credentialIds(n.credentials), disabled, onError, retryOnFail,
     maxTries, waitBetweenTries, executeOnce, alwaysOutputData,
   }).filter(([, v]) => v !== undefined))) as Json;
 }

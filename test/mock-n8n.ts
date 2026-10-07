@@ -38,6 +38,14 @@ export async function startMockN8n(opts: { pageSize?: number } = {}): Promise<Mo
     return null;
   };
   const stamp = (w: any) => ({ ...w, updatedAt: new Date().toISOString(), versionId: `v${++seq}` });
+  // like the real server: a node's credential is looked up by id and stored with the credential's own name
+  const storedCredentials = (body: any) => ({
+    ...body,
+    nodes: body.nodes.map((n: any) => (n.credentials ? {
+      ...n,
+      credentials: Object.fromEntries(Object.entries(n.credentials).map(([type, c]: [string, any]) => [type, { id: c.id, name: `${type} ${c.id}` }])),
+    } : n)),
+  });
 
   const server = http.createServer(async (req, res) => {
     const chunks: Buffer[] = [];
@@ -63,7 +71,7 @@ export async function startMockN8n(opts: { pageSize?: number } = {}): Promise<Mo
     if (req.method === 'POST' && !id) {
       const problem = bad(body);
       if (problem) return send(res, 400, { message: problem });
-      const created = stamp({ ...body, id: `wf${++seq}`, active: false, createdAt: new Date().toISOString(), tags: [] });
+      const created = stamp({ ...storedCredentials(body), id: `wf${++seq}`, active: false, createdAt: new Date().toISOString(), tags: [] });
       store.set(created.id, created);
       return send(res, 200, created);
     }
@@ -73,7 +81,7 @@ export async function startMockN8n(opts: { pageSize?: number } = {}): Promise<Mo
     if (req.method === 'PUT') {
       const problem = bad(body);
       if (problem) return send(res, 400, { message: problem });
-      const updated = stamp({ ...existing, ...body });
+      const updated = stamp({ ...existing, ...storedCredentials(body) });
       store.set(id, updated);
       return send(res, 200, updated);
     }

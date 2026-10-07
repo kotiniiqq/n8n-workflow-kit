@@ -66,3 +66,13 @@ test('normalize ignores server-managed fields and positions, diff names what cha
   (b.nodes as Array<Record<string, unknown>>).push({ id: 'n2', name: 'Extra', type: 'n8n-nodes-base.set', typeVersion: 3, position: [0, 0], parameters: {} });
   assert.deepEqual(diff(normalize(a), normalize(b)), ["+ node 'Extra' (n8n-nodes-base.set)", "~ node 'Hook': parameters changed"]);
 });
+
+test('credentials compare by id: the server rewrites the name, a different id is a real change', () => {
+  const withCred = (id: string, name: string) => {
+    const w = body('c');
+    (w.nodes[0] as Record<string, unknown>).credentials = { httpHeaderAuth: { id, name } };
+    return w;
+  };
+  assert.ok(same(normalize(withCred('cred1', 'helpdesk-api')), normalize(withCred('cred1', 'Helpdesk (prod)'))));
+  assert.deepEqual(diff(normalize(withCred('cred1', 'x')), normalize(withCred('cred2', 'x'))), ["~ node 'Hook': credentials changed"]);
+});
