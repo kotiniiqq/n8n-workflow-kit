@@ -84,4 +84,5 @@ const rejected = node({
 export default workflow('support-intake', 'support-intake')
   .add(webhook)
   .to(normalize)
-  .to(isValid.onTrue(route.to(createTicket).to(accepted)).onFalse(rejected));
+  // the SDK types onTrue as optional on a generic node; on an If node it always exists
+  .to(isValid.onTrue!(route.to(createTicket).to(accepted)).onFalse(rejected));

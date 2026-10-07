@@ -63,6 +63,6 @@ test('normalize ignores server-managed fields and positions, diff names what cha
   b.nodes[0].position = [500, 500];
   assert.ok(same(normalize(a), normalize(b)));
   b.nodes[0].parameters.path = 'changed';
-  b.nodes.push({ id: 'n2', name: 'Extra', type: 'n8n-nodes-base.set', typeVersion: 3, position: [0, 0], parameters: {} });
+  (b.nodes as Array<Record<string, unknown>>).push({ id: 'n2', name: 'Extra', type: 'n8n-nodes-base.set', typeVersion: 3, position: [0, 0], parameters: {} });
   assert.deepEqual(diff(normalize(a), normalize(b)), ["+ node 'Extra' (n8n-nodes-base.set)", "~ node 'Hook': parameters changed"]);
 });
