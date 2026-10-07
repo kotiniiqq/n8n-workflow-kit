@@ -22,5 +22,17 @@
       "helpdeskUrl": "https://helpdesk.example.com/api/tickets",
       "alertsChatId": "-1002222222222"
     }
+  },
+  "local": {
+    "url": "http://localhost:5678",
+    "apiKeyEnv": "N8N_API_KEY_LOCAL",
+    "credentials": {
+      "alerts-bot": "locTelegram0001",
+      "helpdesk-api": "locHelpdesk0001"
+    },
+    "values": {
+      "helpdeskUrl": "http://localhost:8787/api/tickets",
+      "alertsChatId": "-1003333333333"
+    }
   }
 }

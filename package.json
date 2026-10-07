@@ -7,7 +7,9 @@
     "build": "tsx kit/cli.ts build",
     "validate": "tsx kit/cli.ts validate",
     "typecheck": "tsc --noEmit",
-    "kit": "tsx kit/cli.ts"
+    "kit": "tsx kit/cli.ts",
+    "e2e:setup": "tsx e2e/setup-n8n.ts",
+    "e2e": "tsx e2e/real-n8n.ts"
   },
   "author": "Kyrylo Kalashnyk",
   "license": "MIT",

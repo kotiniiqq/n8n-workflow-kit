@@ -8,7 +8,15 @@
     "skipLibCheck": true,
     "noEmit": true,
     "allowImportingTsExtensions": true,
-    "types": ["node"]
+    "types": [
+      "node"
+    ]
   },
-  "include": ["kit", "code", "workflows", "test"]
+  "include": [
+    "kit",
+    "code",
+    "workflows",
+    "test",
+    "e2e"
+  ]
 }
