@@ -100,6 +100,11 @@ A design spec and plan first, then test-first implementation task by task. The t
 real deadlock along the way: a CLI test that spawned the kit synchronously blocked the mock server
 living in the same process.
 
+## Contact
+
+Feedback, ideas, job offers or custom projects (n8n, MCP, AI automation): [kotiniiqq@gmail.com](mailto:kotiniiqq@gmail.com).
+Bug reports and feature requests are welcome in [Issues](https://github.com/kotiniiqq/n8n-workflow-kit/issues).
+
 ## License
 
 MIT
