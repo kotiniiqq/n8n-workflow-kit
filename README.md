@@ -4,6 +4,8 @@ n8n workflows as TypeScript, with the safety net hand-edited workflows lack: Cod
 ordinary modules with unit tests, deterministic builds per environment, validation, and a deploy
 that backs up what it replaces, refuses to overwrite edits made in the UI, and can roll back.
 
+<img src="https://raw.githubusercontent.com/kotiniiqq/n8n-workflow-kit/main/docs/assets/overview.svg" width="640" alt="n8n-workflow-kit flow">
+
 > Reference implementation of how I ran client automations: workflows generated from versioned
 > code and deployed through the n8n API. The example workflows here are synthetic.
 
